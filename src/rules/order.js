@@ -108,6 +108,8 @@ function convertGroupsToRanks(groups) {
   }, rankObject)
 }
 
+const EXPECTED_EMPTY_LINE_COUNT = 1;
+
 function makeNewlinesBetweenReport (context, imported, newlinesBetweenImports) {
   const getNumberOfEmptyLinesBetween = (currentImport, previousImport) => {
     const linesBetweenImports = context.getSourceCode().lines.slice(
@@ -117,27 +119,43 @@ function makeNewlinesBetweenReport (context, imported, newlinesBetweenImports) {
 
     return linesBetweenImports.filter((line) => !line.trim().length).length
   }
+
   let previousImport = imported[0]
 
   imported.slice(1).forEach(function(currentImport) {
+    const emptyLinesCount = getNumberOfEmptyLinesBetween(currentImport, previousImport);
+    const sourceCode = context.getSourceCode();
+    const getRange = (currentImport, previousImport) => {
+      return [
+        sourceCode.getLastToken(previousImport.node).range[1] + 1,
+        sourceCode.getFirstToken(currentImport.node).range[0],
+      ];
+    };
+
+
     if (newlinesBetweenImports === 'always') {
-      if (currentImport.rank !== previousImport.rank
-        && getNumberOfEmptyLinesBetween(currentImport, previousImport) === 0)
-      {
-        context.report(
-          previousImport.node, 'There should be at least one empty line between import groups'
-        )
-      } else if (currentImport.rank === previousImport.rank
-        && getNumberOfEmptyLinesBetween(currentImport, previousImport) > 0)
-      {
-        context.report(
-          previousImport.node, 'There should be no empty line within import group'
-        )
+      if (currentImport.rank !== previousImport.rank && emptyLinesCount === 0) {
+        context.report({
+          node: previousImport.node,
+          message: 'There should be at least one empty line between import groups',
+          fix: fixer => fixer.insertTextAfter(
+            sourceCode.getLastToken(previousImport.node),
+            '\n'.repeat(EXPECTED_EMPTY_LINE_COUNT - emptyLinesCount)
+          )
+        });
+      } else if (currentImport.rank === previousImport.rank && emptyLinesCount > 0) {
+        context.report({
+          node: previousImport.node,
+          message: 'There should be no empty line within import group',
+          fix: fixer => fixer.removeRange(getRange(currentImport, previousImport))
+        });
       }
-    } else {
-      if (getNumberOfEmptyLinesBetween(currentImport, previousImport) > 0) {
-        context.report(previousImport.node, 'There should be no empty line between import groups')
-      }
+    } else if (emptyLinesCount > 0) {
+      context.report({
+        node: previousImport.node,
+        message: 'There should be no empty line between import groups',
+        fix: fixer => fixer.removeRange(getRange(currentImport, previousImport))
+      });
     }
 
     previousImport = currentImport
@@ -147,7 +165,7 @@ function makeNewlinesBetweenReport (context, imported, newlinesBetweenImports) {
 module.exports = {
   meta: {
     docs: {},
-
+    fixable: 'code',
     schema: [
       {
         type: 'object',
